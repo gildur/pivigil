@@ -1,0 +1,17 @@
+NK57 Monospace Regular
+
+Author: Ray Larabie / Typodermic Fonts
+Original filename: NK57 Monospace No Rg.otf (normal width, regular weight)
+Bundled filename: NK57Monospace-Regular.otf
+The font bytes are unmodified.
+
+This font is dedicated to the public domain under CC0 1.0 Universal.
+Upstream dedication and font index:
+https://typodermicfonts.com/public-domain/
+CC0 dedication:
+https://creativecommons.org/publicdomain/zero/1.0/
+Original archive:
+https://typodermicfonts.com/assets/downloads/cc0-fonts/nk57-monospace.zip
+
+SHA-256 of the bundled font:
+89230a04f2de6a7d1f98d6a4e74c6b1f743d4e25a9ac8108666b991bcfb62098

@@ -1,0 +1,16 @@
+[Unit]
+Description=PiVigil video monitoring system
+
+[Service]
+User=pivigil
+Group=pivigil
+SupplementaryGroups=video render
+ExecStart=/usr/bin/pivigil
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=120
+StateDirectory=pivigil
+StateDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target

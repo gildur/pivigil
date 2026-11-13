@@ -1,0 +1,141 @@
+# Complete configuration reference. Values below match the daemon's built-in defaults.
+# Keep machine-specific overrides in a private file; restart the daemon after changes.
+# Unknown keys and invalid values are rejected, including settings currently unused.
+
+[camera]
+# Encoder: "auto", "hardware", or "software". Auto prefers bcm2835-codec-encode;
+# only absence permits software fallback. Hardware access/configuration errors fail.
+# Both encoders are included in every build; Pi 5 uses the OpenH264 software backend.
+# All backends run inside the daemon; no camera/encoder subprocesses are launched.
+encoder = "auto"
+# Zero-based index in libcamera's list of connected cameras.
+index = 0
+# Continuous autofocus on cameras advertising AfMode. Fixed-focus modules (v1/v2)
+# receive no unsupported focus controls. False selects manual mode when available.
+autofocus = false
+# Manual focus in dioptres: 0=infinity, 1=1 metre, 2=0.5 metre; finite and >=0.
+# Applied only when autofocus=false and both AfMode and LensPosition are available.
+lens_position = 0.0
+# Recording and motion-analysis resolution. There is no separate detection image.
+# Width/height: even and >=64, within MP4's 16-bit dimension fields and the
+# platform's frame-buffer range. Must be supported as YUV420 by the camera and
+# selected encoder; there is no application-level 1920x1080 cap.
+width = 1280
+height = 720
+# Capture frames per second, integer 1..30; subject to camera/encoder/storage capacity.
+framerate = 15
+# H.264 quality fraction 0..1 (finite): 0=lowest/smallest, 1=highest/largest, still lossy.
+# Both encoders use QP=round(51-50*quality), range 1..51.
+# File size varies with the scene. OpenH264 supports up to 3840x2160 (or portrait).
+quality = 0.6
+# Suppress file recording for 0..300 seconds after the first usable camera frame.
+# Applies to motion-triggered and continuous recording; live streaming starts earlier.
+warmup_seconds = 3
+# Delay before reinitializing failed capture/encoding, seconds 1..300.
+restart_seconds = 5
+# Wait for the first usable frame after starting capture, seconds 5..300.
+startup_timeout_seconds = 30
+# Camera-frame and pending-encoder progress deadline, seconds 2..300.
+frame_timeout_seconds = 10
+
+[motion]
+# True: motion-triggered recording. False: record continuously after camera warmup.
+# recording.enabled=false takes precedence. Disabled detection allocates no image
+# history and does not read image pixels for comparisons.
+enabled = true
+# Per-pixel threshold: abs(current-previous)/255, finite fraction 0..1.
+# 0.05 needs at least 13 brightness levels; identical pixels never count, even at 0.
+pixel_difference_threshold = 0.05
+# Minimum changed fraction across the full frame, finite >0 and <=1; must represent
+# at least one pixel. 0.005 means 0.5% of the original image. No crop, ROI or downscale.
+region_threshold = 0.005
+# Analyze one in every N frames; integer 1..(framerate*10). Here 15/3=5 analyses/sec.
+frame_period = 3
+
+[recording]
+# False disables all file recording, independent of live streaming. The daemon then
+# skips output-directory creation, free-space checks, motion analysis and
+# pre-motion buffering. Service-specific mount dependencies remain independent.
+enabled = true
+# Absolute output directory, created if needed when recording is enabled. The
+# service user needs write access.
+# All clips are written directly here.
+output_dir = "/var/lib/pivigil"
+# Complete filename including extension, using local capture time and Linux strftime.
+# %Y=year, %m=month, %d=day, %H=hour, %M=minute, %S=second, %s=Unix seconds, %%=percent.
+# Example: "camera-%Y%m%d-%H%M%S.mp4". The first recorded frame supplies the time,
+# including pre-motion history. Content is always MP4; keep .mp4 for media players.
+# Format length 1..512 bytes; expansion must be one nonempty filename <=250 UTF-8
+# bytes, without /, backslash, control characters or . / .. directory entries.
+# No subdirectories. Collisions add _001, _002, etc. before the extension, never overwrite.
+filename_format = "%Y-%m-%d_%H-%M-%S.mp4"
+# Encoded pre-motion history in RAM, seconds 0..30; 0 disables. Ignored in continuous
+# or disabled recording. Starts at the preceding keyframe, so may include ~1s extra.
+# Also bounded by pre_motion_buffer_mb; complex/high-quality scenes can shorten it.
+pre_motion_seconds = 2
+# Encoded pre-motion payload budget in MiB, positive integer (default 64).
+# Must fit in the platform's buffer range. Allocated on demand; excludes metadata,
+# temporary copies and other buffers. Evicts whole keyframe groups when full.
+# Ignored when pre_motion_seconds=0, or in continuous/disabled recording.
+pre_motion_buffer_mb = 64
+# Recording worker payload budget in MiB, positive integer (default 64).
+# Must fit in the platform's buffer range. Allocated on demand, including the frame
+# currently being written. Also bounded at 2048 frames and 4096 queued commands.
+# When pre-motion recording is active, must be >= pre_motion_buffer_mb; choose a
+# larger value to leave room for headers and new frames while history is written.
+# A full queue returns an error and triggers capture recovery. Ignored when
+# recording.enabled=false; this is independent of the live-stream buffer.
+backlog_buffer_mb = 64
+# Tail after the first quiet motion sample, seconds 1..3600. New motion extends the
+# event; repeated quiet samples do not. Ignored in continuous/disabled recording.
+post_motion_seconds = 4
+# Maximum clip duration, seconds 1..86400. Rotate at the next IDR keyframe (normally
+# up to ~1 second later). Applies to both motion-triggered and continuous recording.
+max_file_seconds = 300
+# Free-space reserve in MiB, integer 1..1000000. Check before opening each new MP4,
+# including rotation. Open clips finish without further checks and may use space
+# below the reserve. Below it, skip new files and retry at subsequent keyframes
+# while recording is requested. Never delete existing files.
+# Filesystem I/O and space checks run on a bounded worker thread; temporary NAS
+# delays do not block capture. Sustained storage overload is reported as an error.
+min_free_mb = 256
+
+[overlay]
+# Burn text and capture datetime into recorded AND streamed video, after motion
+# analysis. False skips font initialization and preserves read-only camera mappings.
+enabled = true
+# Literal UTF-8 label, <=256 characters. Empty for datetime only; explicit newlines
+# are allowed. Label and datetime are otherwise joined on one line and clipped.
+text = ""
+# Local capture datetime in Linux strftime format, <=512 bytes; empty for text only.
+# %z / %Z add timezone offset/name. {frame} adds a zero-based capture-frame counter
+# within the displayed second, padded to >=2 digits; it is not milliseconds.
+# The capture time/counter stay correct in pre-motion footage. Explicit newlines
+# are supported. At least text or datetime must be nonempty when overlay is enabled.
+datetime_format = "%Y-%m-%d %H:%M:%S.{frame}"
+# Corner: "top_left", "top_right", "bottom_left", or "bottom_right".
+position = "top_left"
+# Font size in pixels, integer 8..72; embedded NK57 Monospace Regular (CC0 public domain), antialiased white.
+font_size = 12
+# Distance from the corner in pixels, integer 0..128; must leave drawable space.
+# Coordinates align to even pixels for YUV420 chroma.
+margin = 12
+# Black background opacity, finite 0..1: 0=transparent, 1=solid black.
+background_opacity = 0.0
+
+[stream]
+# Enable the in-process HTTP viewer. Reuses the same encoded H.264 without another
+# encoder or process. Encoding continues while enabled, even with no viewers or
+# file recording disabled. No encoded backlog is retained without viewers.
+enabled = true
+# Socket address. 0.0.0.0 exposes all IPv4 interfaces; use
+# 127.0.0.1:8080 for loopback only. Port 1..65535 when enabled.
+# There is no authentication or TLS: any device that can reach this address can
+# view video. Browser: http://HOST:8080/ ; VLC: http://HOST:8080/live.mp4 .
+# /status.json reports camera/codec readiness and current viewer count.
+listen = "0.0.0.0:8080"
+# Simultaneous live viewers, integer 1..8. Additional viewers receive HTTP 503.
+max_clients = 2
+# Shared encoded-video buffer limit in MiB, integer 8..64; also capped at 120 frames.
+# Slow viewers resynchronize at a recent keyframe. Stalled writes time out.
+max_buffer_mb = 8

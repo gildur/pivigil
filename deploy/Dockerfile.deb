@@ -1,0 +1,91 @@
+# syntax=docker/dockerfile:1
+ARG RUST_VERSION=1.99.1
+ARG DEBIAN_RELEASE=bookworm
+FROM --platform=$BUILDPLATFORM rust:${RUST_VERSION}-trixie AS verify
+
+# Run tests on the build host, including the kernel process guard. Native
+# libcamera headers must include the FrameStartup status used by the bindings.
+RUN echo 'deb http://deb.debian.org/debian trixie-backports main' \
+        > /etc/apt/sources.list.d/backports.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends pkg-config clang libclang-dev \
+    && apt-get install -y --no-install-recommends -t trixie-backports libcamera-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN rustup component add rustfmt clippy
+WORKDIR /build
+COPY Cargo.toml Cargo.lock README.md LICENSE pivigil.toml ./
+COPY src/ src/
+COPY assets/ assets/
+COPY verify.sh ./
+RUN sh verify.sh
+
+FROM --platform=$BUILDPLATFORM rust:${RUST_VERSION}-${DEBIAN_RELEASE} AS build
+ARG DEBIAN_RELEASE
+ARG TARGETPLATFORM
+
+# Use Raspberry Pi OS libraries, including its newer libcamera on Bookworm.
+RUN test "$TARGETPLATFORM" = linux/arm64 \
+    && case "$(dpkg --print-architecture)" in \
+        amd64) dpkg --add-architecture arm64 ;; \
+        arm64) ;; \
+        *) echo 'Supported build architectures: amd64, arm64' >&2; exit 1 ;; \
+    esac \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && curl -fsSL https://archive.raspberrypi.com/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2025.1+rpt1_all.deb \
+        -o /tmp/raspberrypi-keyring.deb \
+    && echo '2e727149d7acb8cc7f604e66d0049161039c8aa1eaf1175e54f9e69d963d60e4  /tmp/raspberrypi-keyring.deb' | sha256sum -c - \
+    && dpkg-deb -x /tmp/raspberrypi-keyring.deb /tmp/raspberrypi-keyring \
+    && cp /tmp/raspberrypi-keyring/usr/share/keyrings/raspberrypi-archive-keyring.pgp \
+        /usr/share/keyrings/raspberrypi-archive-keyring.gpg \
+    && rm -rf /tmp/raspberrypi-keyring /tmp/raspberrypi-keyring.deb
+# Raspberry Pi's core libraries have different versions from Debian's and cannot
+# coexist with the native ones under multiarch. Prefer only its camera packages.
+RUN echo "deb [arch=arm64 signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] https://archive.raspberrypi.com/debian ${DEBIAN_RELEASE} main" \
+        > /etc/apt/sources.list.d/raspberrypi.list \
+    && printf '%s\n' \
+        'Package: *' 'Pin: origin archive.raspberrypi.com' 'Pin-Priority: 100' '' \
+        'Package: libcamera*:any libpisp*:any' 'Pin: origin archive.raspberrypi.com' 'Pin-Priority: 500' \
+        > /etc/apt/preferences.d/raspberrypi \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        pkg-config clang libclang-dev dpkg-dev \
+        libcamera-dev:arm64 libc6-dev:arm64 \
+    && if [ "$(dpkg --print-architecture)" = amd64 ]; then \
+        apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu; \
+    fi \
+    && rm -rf /var/lib/apt/lists/*
+RUN rustup target add aarch64-unknown-linux-gnu \
+    && rustup component add clippy
+
+# Keep build scripts native while compiling Rust, the C++ wrapper and bindings
+# against ARM64 headers and libraries. Do not search the host's pkg-config files.
+ENV RUSTFLAGS="-D warnings" \
+    RUSTDOCFLAGS="-D warnings" \
+    CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+    CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+    CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++ \
+    AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar \
+    PKG_CONFIG_LIBDIR_aarch64_unknown_linux_gnu=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig \
+    PKG_CONFIG_SYSROOT_DIR_aarch64_unknown_linux_gnu=/ \
+    BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_gnu="--target=aarch64-linux-gnu --gcc-toolchain=/usr -isystem /usr/include/aarch64-linux-gnu"
+
+WORKDIR /build
+COPY --from=verify /build/Cargo.toml /build/Cargo.lock /build/README.md /build/LICENSE /build/pivigil.toml ./
+COPY --from=verify /build/src/ src/
+COPY --from=verify /build/assets/ assets/
+COPY deploy/pivigil.service deploy/pivigil.sysusers deploy/
+RUN cargo clippy --locked --all-targets --all-features --target aarch64-unknown-linux-gnu -- -D warnings \
+    && cargo clippy --locked --release --all-targets --all-features --target aarch64-unknown-linux-gnu -- -D warnings \
+    && cargo test --locked --all-targets --all-features --target aarch64-unknown-linux-gnu --no-run \
+    && cargo doc --locked --all-features --no-deps --document-private-items --target aarch64-unknown-linux-gnu
+
+FROM build AS deb
+RUN cargo install cargo-deb --version 3.8.0 --locked \
+    && cargo deb --locked --target aarch64-unknown-linux-gnu \
+    && mkdir /packages \
+    && cp target/debian/*.deb /packages/
+
+FROM scratch AS package
+COPY --from=deb /packages/ /

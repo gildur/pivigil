@@ -1,0 +1,3 @@
+u pivigil - "PiVigil video monitoring system" /var/lib/pivigil /usr/sbin/nologin
+m pivigil video
+m pivigil render

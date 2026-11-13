@@ -1,0 +1,55 @@
+[package]
+name = "pivigil"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.99.1"
+description = "PiVigil video monitoring system"
+license = "GPL-3.0-only"
+
+[package.metadata.deb]
+maintainer = "Piotr Wolny <gildur@gmail.com>"
+copyright = "2026, Piotr Wolny"
+license-file = ["LICENSE", "0"]
+revision = "1"
+depends = "$auto, libcamera-ipa, systemd-sysv"
+section = "video"
+priority = "optional"
+extended-description = """\
+PiVigil turns a Raspberry Pi camera into a video monitoring system with motion
+detection, H.264 recording, and live streaming. It supports hardware and software
+encoding, pre-event recording, and video overlays."""
+maintainer-scripts = "deploy"
+assets = [
+    ["target/release/pivigil", "usr/bin/pivigil", "755"],
+    ["pivigil.toml", "etc/pivigil.toml", "644"],
+    ["README.md", "usr/share/doc/pivigil/README.md", "644"],
+    ["LICENSE", "usr/share/doc/pivigil/LICENSE", "644"],
+    ["assets/FONT-NOTICE.txt", "usr/share/doc/pivigil/FONT-NOTICE.txt", "644"],
+    ["assets/OPENH264-LICENSE.txt", "usr/share/doc/pivigil/OPENH264-LICENSE.txt", "644"],
+]
+
+[package.metadata.deb.systemd-units]
+unit-scripts = "deploy"
+enable = true
+start = true
+restart-after-upgrade = true
+stop-on-upgrade = false
+
+[dependencies]
+anyhow = "1.0.104"
+libc = "0.2.191"
+serde = { version = "1.0.229", features = ["derive"] }
+libcamera = "0.8.0"
+v4l2-sys-mit = "0.3.0"
+signal-hook = { version = "0.4.6", default-features = false }
+toml = { version = "1.2.1", default-features = false, features = ["std", "serde", "parse"] }
+mp4 = "0.14.0"
+memchr = "2.8.3"
+fontdue = { version = "0.9.5", default-features = false, features = ["std", "simd"] }
+# Compile OpenH264 from the crate's bundled source and link it into the executable.
+openh264-sys2 = { version = "0.9.10", default-features = false, features = ["source"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

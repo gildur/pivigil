@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PiVigil</title>
+<style>body{margin:0;background:#141619;color:#eee;font:16px system-ui}main{max-width:1200px;margin:auto;padding:20px}header{display:flex;align-items:center;gap:20px}h1{font-size:22px;flex:1}a{color:#9dc5ff}video{display:block;width:100%;background:#000;border-radius:8px}#status{color:#b8c1cb}#status:empty{display:none}</style>
+<main><header><h1>PiVigil</h1><a href="/live.mp4">Video stream URL</a></header><video id="video" controls autoplay muted playsinline></video><p id="status">Connecting…</p></main>
+<script>
+const video=document.querySelector('#video'),status=document.querySelector('#status');
+const Media=window.MediaSource||window.ManagedMediaSource;
+let stopped=false,abort;
+video.addEventListener('play',()=>{if(video.buffered.length){const end=video.buffered.end(video.buffered.length-1);if(end-video.currentTime>2.5)video.currentTime=Math.max(video.buffered.start(0),end-0.2);}});
+window.addEventListener('pagehide',()=>{stopped=true;if(abort)abort.abort();});
+function updated(buffer){return new Promise((resolve,reject)=>{const clear=()=>{buffer.removeEventListener('updateend',done);buffer.removeEventListener('error',failed);};const done=()=>{clear();resolve();};const failed=()=>{clear();reject(new Error('Video decode failed'));};buffer.addEventListener('updateend',done);buffer.addEventListener('error',failed);});}
+async function run(){
+ if(!Media){status.textContent='This browser cannot play live MP4. Open the video link in VLC.';return;}
+ while(!stopped){
+  let url,reader;
+  try{
+   status.textContent='Connecting…';abort=new AbortController();
+   const response=await fetch('/live.mp4',{signal:abort.signal,cache:'no-store'});
+   if(!response.ok)throw new Error('Camera unavailable');
+   const mime='video/mp4; codecs="'+response.headers.get('X-Video-Codec')+'"';
+   if(!Media.isTypeSupported(mime)){status.textContent='This browser does not support this camera codec. Open the video link in VLC.';return;}
+   const media=new Media();url=URL.createObjectURL(media);video.disableRemotePlayback=true;video.src=url;
+   await new Promise((resolve,reject)=>{media.addEventListener('sourceopen',resolve,{once:true});abort.signal.addEventListener('abort',reject,{once:true});});
+   const buffer=media.addSourceBuffer(mime);media.duration=Infinity;reader=response.body.getReader();let started=false;
+   while(!stopped){
+    const {value,done}=await reader.read();if(done)throw new Error('Stream ended');
+    buffer.appendBuffer(value);await updated(buffer);
+    if(video.buffered.length){
+     const start=video.buffered.start(0),end=video.buffered.end(video.buffered.length-1);
+     let contains=false;for(let i=0;i<video.buffered.length;i++)if(video.currentTime>=video.buffered.start(i)&&video.currentTime<video.buffered.end(i))contains=true;
+     if((!video.paused||!started)&&(!contains||end-video.currentTime>2.5))video.currentTime=Math.max(start,end-0.2);
+     if(media.setLiveSeekableRange)media.setLiveSeekableRange(start,end);
+     if(end>10&&buffer.buffered.length&&buffer.buffered.start(0)<end-10){buffer.remove(0,end-10);await updated(buffer);}
+     if(!started){started=true;video.play().catch(()=>{});}status.textContent='';
+    }
+   }
+  }catch(error){if(!stopped)status.textContent='Reconnecting…';}
+  finally{if(reader)await reader.cancel().catch(()=>{});if(abort)abort.abort();video.removeAttribute('src');video.load();if(url)URL.revokeObjectURL(url);}
+  if(!stopped)await new Promise(resolve=>setTimeout(resolve,1000));
+ }
+}
+run();
+</script></html>

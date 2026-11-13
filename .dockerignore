@@ -1,0 +1,8 @@
+/target/
+/dist/
+
+# Private machine configuration, deployment scripts and artifacts.
+/.local/
+
+# Git history is not needed in the build context.
+/.git/
